@@ -7,6 +7,7 @@
 //  Blue LED connected to pin 6
 //  Piezo buzzer connected to pin 8
 //  Status LED connected to pin 9
+//  Battery+ connected to A4 through 19.4kOhm/4.7kOhm voltage divider
 
 //define the pins for software I2C
 #define SDA_PORT PORTD
@@ -18,8 +19,19 @@
 #include "MLX90615.h"
 #include "pitches.h"
 #include <EEPROM.h>
+#include <SoftwareSerial.h>  //Software Serial to interface with ESP8266
+SoftwareSerial ESP8266(10,11);  //RX,TX
 
 MLX90615 mlx90615;
+
+#define IP "184.106.153.149"  // thingspeak.com IP address
+String GET1 = "GET /apps/thinghttp/send_request?api_key=2U8BP46H4FGPNMD9"; // GET request to activate thingHTTP app
+String GET2 = "GET /update?api_key=RN52D7405338F2JE&field"; // GET request to send temperature data to thingspeak
+String field1="1=";  // object temperature
+String field2="&field2=";  // ambient temperature
+String field3="&field3=";  // mode
+String field4="&field4=";  // battery voltage
+String field5="&field5=";  // threshold temperature
 
 // melodies for acknowledgements:
 int melody1[] = {
@@ -44,11 +56,15 @@ float bb = 0.0;  // blue temperature scale variable
 float br = 0.0;  // red temperature scale variable
 int brightnessb = 0;  // blue LED PWM intensity for analogueWrite()
 int brightnessr = 0;  // red LED PWM intensity for analogueWrite()
-int tcool = 0;  // time elapsed since tea placed on device (ms)
+unsigned long tcool = 0;  // time elapsed since tea placed on device (ms)
+unsigned long tpost = 0;  // time elapsed since last thingspeak post
+int ipost = 0;
+
+float Aref = 1.06598;  // the internal reference voltage for battery measurement
+float vbat;  // battery voltage
 
 // the threshold temperature 
 // retrieve from EEPROM address 1 and convert to float
-
 int address = 1;
 byte value;
 float ttemp;
@@ -67,6 +83,7 @@ int tmode = 0;
 
 void setup()
 {
+  analogReference(INTERNAL); // use the internal ~1.1volt reference for battery indication
   value = EEPROM.read(address);   // retrieve from EEPROM address 1
   ttemp = value;                  // convert to float
   Serial.begin(9600);             // UART serial for debugging
@@ -74,6 +91,8 @@ void setup()
   Serial.print("ttemp: ");
   Serial.println(ttemp);
   mlx90615.init();                // initialize soft i2c wires
+  
+  ESP8266.begin(9600); // start communication with the ESP8266 via soft serial
   
   pinMode(ledb, OUTPUT);
   pinMode(ledr, OUTPUT);
@@ -87,9 +106,15 @@ void loop()
     oldtemp2 = oldtemp;  // save previous values of object temperature
     oldtemp = otemp;
     
-    Serial.print("Object temperature: ");
+    Serial.print("otemp: ");
     otemp = mlx90615.printTemperature(MLX90615_OBJECT_TEMPERATURE);  // get the object temperature
     Serial.println(otemp);
+    Serial.print("atemp: ");
+    atemp = mlx90615.printTemperature(MLX90615_AMBIENT_TEMPERATURE); // get the ambient temperature
+    Serial.println(atemp);
+
+    int avalue = analogRead(A1); //read divided voltage from A1
+    vbat = avalue*Aref*4.1277/1024; //battery voltage
 
 //  detect hot cup (either at startup or after being placed on detector) - this is done by detecting an increase in object temperature above the threshold
 //  and place into mode 1
@@ -116,6 +141,9 @@ void loop()
         noTone(buzz);
       }
     tcool = currentMillis;  //  start the timer
+    tpost = currentMillis - 55000); // start posting in 5 seconds
+    ESP8266.println("AT+RST"); // reset the ESP8266.
+    Serial.println("AT+RST"); 
     }
 
 // detect cup removed from detector: sharp drop in temperature (> 10 degrees) over 1 cycle. 
@@ -141,9 +169,52 @@ void loop()
       Serial.print(" seconds ");
       
 //    send SMS message via ThingHTTP
+      ESP8266.println("AT+RST"); // this resets the ESP8266.
+      Serial.println("AT+RST");
+      delay(5000);
+//      ESP8266.println("AT"); // check ESP8266 is OK
+//      delay(1500)
+//      if(ESP8266.find("OK")){
+//        Serial.println("OK"); 
+//        Serial.println("Connected");
+//      } 
+      
+      String cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
+      cmd += IP; // concatenating the cmd string with IP
+      cmd += "\",80"; // port 80
 
+      ESP8266.println(cmd); // pass command to ESP8266
+      Serial.println(cmd);
+      delay(3000);
+      
+      if(ESP8266.find("Error")){
+        Serial.println("AT+CIPSTART Error");
+        delay(5000);
+        Serial.println("try again ...");
+        ESP8266.println(cmd);
+        Serial.println(cmd);
+        delay(3000);
+      }
+      
+      cmd = GET1; // sending HTTP get to ThingHTTP
+      cmd += "\r\n\r\n"; 
+      ESP8266.print("AT+CIPSEND="); 
+      ESP8266.println(cmd.length());
+      Serial.print("AT+CIPSEND=");
+      Serial.println(cmd.length());
+      delay(5000);
+      if(ESP8266.find(">")){ // check that the prompt is recieved
+        ESP8266.print(cmd); // pass GET command to ESP8266
+        Serial.print(">");
+        Serial.println(cmd);
+      }
+      else
+      {
+        Serial.println("AT+CIPSEND error");
+      }
+      
       //sound alarm (40 cycles)
-      for (int thisNote = 0; thisNote < 40; thisNote++) {
+      for (int thisNote = 0; thisNote < 30; thisNote++) {
         tone(buzz, melody2[0], 200);
         delay(200);
         noTone(buzz);
@@ -152,7 +223,7 @@ void loop()
         //if the cup is picked up, stop the alarm and enter mode 0
         // get the object temperature
         otemp = mlx90615.printTemperature(MLX90615_OBJECT_TEMPERATURE);
-        if(otemp < 42.0) {
+        if(otemp < tcold) {
           thisNote = 40;
           tmode = 0;
           Serial.println("Cup picked up: alarm cancelled");
@@ -274,6 +345,55 @@ void loop()
     Serial.println(tmode);
 
 // post to data thingspeak every 60 seconds if in mode 1,2 or 3
-
+    if(mode == 1 || mode == 2 || mode == 3)
+    {
+      if(currentMillis - tpost >= 50000 && ipost == 0)
+      {
+        tpost = currentMillis;
+        ipost = 1;
+        String cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
+        cmd += IP; // concatenating the cmd string with IP
+        cmd += "\",80"; // port 80
+        ESP8266.println(cmd); // pass command to ESP8266
+        Serial.println(cmd);
+      }
+      if(currentMillis - tpost >= 5000 && ipost == 1)
+      {
+        tpost = currentMillis;
+        ipost = 2;
+        
+        cmd = GET2;
+        cmd += field1;
+        cmd += otemp;
+        cmd += field2;
+        cmd += atemp;
+        cmd += field3;
+        cmd += mode;
+        cmd += field4;
+        cmd += vbat;
+        cmd += field5;
+        cmd += ttemp;
+        cmd += "\r\n\r\n";
+        ESP8266.print("AT+CIPSEND="); 
+        ESP8266.println(cmd.length());
+        Serial.print("AT+CIPSEND=");
+        Serial.println(cmd.length());
+      }
+      if(currentMillis - tpost >= 5000 && ipost == 2)
+      {
+        tpost = currentMillis;
+        ipost = 0;
+        
+        if(ESP8266.find(">")){ 
+          ESP8266.print(cmd); // GET command string to ESP8266
+          Serial.print(">");
+          Serial.println(cmd);
+        }
+        else
+        {
+          Serial.println("AT+CIPSEND error2");
+        }
+      }
+    }
     delay(1000);  
 }
