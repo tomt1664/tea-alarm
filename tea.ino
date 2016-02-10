@@ -25,8 +25,8 @@ SoftwareSerial ESP8266(10,11);  //RX,TX
 MLX90615 mlx90615;
 
 #define IP "184.106.153.149"  // thingspeak.com IP address
-String GET1 = "GET /apps/thinghttp/send_request?api_key=2U8BP46H4FGPNMD9"; // GET request to activate thingHTTP app
-String GET2 = "GET /update?api_key=RN52D7405338F2JE&field"; // GET request to send temperature data to thingspeak
+String GET1 = "GET /apps/thinghttp/send_request?api_key=XXXXXXXXXXXXXXXX"; // GET request to activate thingHTTP app
+String GET2 = "GET /update?api_key=XXXXXXXXXXXXXXXX&field"; // GET request to send temperature data to thingspeak
 String field1="1=";  // object temperature
 String field2="&field2=";  // ambient temperature
 String field3="&field3=";  // mode
@@ -116,7 +116,7 @@ void loop()
     Serial.println(atemp);
 
     int avalue = analogRead(A4); //read divided voltage from A1
-    vbat = avalue*Aref*4.1277/1024; //battery voltage
+    vbat = avalue*Aref*4.0277/1024; //battery voltage
 
 //  detect hot cup (either at startup or after being placed on detector) - this is done by detecting an increase in object temperature above the threshold
 //  and place into mode 1
