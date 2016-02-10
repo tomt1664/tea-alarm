@@ -32,6 +32,7 @@ String field2="&field2=";  // ambient temperature
 String field3="&field3=";  // mode
 String field4="&field4=";  // battery voltage
 String field5="&field5=";  // threshold temperature
+String cmd;
 
 // melodies for acknowledgements:
 int melody1[] = {
@@ -50,6 +51,7 @@ int buzz = 8; // buzzer
 int statled = 9; // status
 
 float otemp = 0.0; // object temperature
+float atemp = 0.0; // ambient temperature
 float oldtemp = 0.0; // previous object temperatures
 float oldtemp2 = 0.0;
 float bb = 0.0;  // blue temperature scale variable
@@ -60,7 +62,7 @@ unsigned long tcool = 0;  // time elapsed since tea placed on device (ms)
 unsigned long tpost = 0;  // time elapsed since last thingspeak post
 int ipost = 0;
 
-float Aref = 1.06598;  // the internal reference voltage for battery measurement
+float Aref = 1.04598;  // the internal reference voltage for battery measurement
 float vbat;  // battery voltage
 
 // the threshold temperature 
@@ -113,7 +115,7 @@ void loop()
     atemp = mlx90615.printTemperature(MLX90615_AMBIENT_TEMPERATURE); // get the ambient temperature
     Serial.println(atemp);
 
-    int avalue = analogRead(A1); //read divided voltage from A1
+    int avalue = analogRead(A4); //read divided voltage from A1
     vbat = avalue*Aref*4.1277/1024; //battery voltage
 
 //  detect hot cup (either at startup or after being placed on detector) - this is done by detecting an increase in object temperature above the threshold
@@ -141,14 +143,14 @@ void loop()
         noTone(buzz);
       }
     tcool = currentMillis;  //  start the timer
-    tpost = currentMillis - 55000); // start posting in 5 seconds
+    tpost = currentMillis - 15000; // start posting in 15 seconds
     ESP8266.println("AT+RST"); // reset the ESP8266.
     Serial.println("AT+RST"); 
     }
 
 // detect cup removed from detector: sharp drop in temperature (> 10 degrees) over 1 cycle. 
 // and place into mode 0
-    if(otemp < (ttemp - 8.0) && oldtemp > ttemp && tmode == 2) {
+    if(otemp < (ttemp - 2.0) && oldtemp > (ttemp + 2.0) && tmode == 2) {
       tmode = 0;
       Serial.println("Cup removed, entering mode 0");
       tcool = 0; // reset the timer
@@ -156,7 +158,7 @@ void loop()
       
 //  temperature dropped below threshold 
 //  and place into mode 3 and sound alarm
-    if(otemp < ttemp && otemp > (ttemp - 8.0) && tmode == 2) {
+    if(otemp < ttemp && otemp > (ttemp - 2.0) && oldtemp < (ttemp + 2.0) && tmode == 2) {
       tmode = 3;
       Serial.println("Temperature alarm: entering mode 3");
       int timepassed = (currentMillis - tcool)/1000; //  time since mode 2 entered (s)
@@ -166,7 +168,7 @@ void loop()
       Serial.print(mins);
       Serial.print(" minutes ");
       Serial.print(secs);
-      Serial.print(" seconds ");
+      Serial.println(" seconds ");
       
 //    send SMS message via ThingHTTP
       ESP8266.println("AT+RST"); // this resets the ESP8266.
@@ -179,13 +181,13 @@ void loop()
 //        Serial.println("Connected");
 //      } 
       
-      String cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
+      cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
       cmd += IP; // concatenating the cmd string with IP
       cmd += "\",80"; // port 80
 
       ESP8266.println(cmd); // pass command to ESP8266
       Serial.println(cmd);
-      delay(3000);
+      delay(4000);
       
       if(ESP8266.find("Error")){
         Serial.println("AT+CIPSTART Error");
@@ -202,7 +204,7 @@ void loop()
       ESP8266.println(cmd.length());
       Serial.print("AT+CIPSEND=");
       Serial.println(cmd.length());
-      delay(5000);
+      delay(7000);
       if(ESP8266.find(">")){ // check that the prompt is recieved
         ESP8266.print(cmd); // pass GET command to ESP8266
         Serial.print(">");
@@ -212,6 +214,9 @@ void loop()
       {
         Serial.println("AT+CIPSEND error");
       }
+
+      ipost = 0;
+      tpost = currentMillis - 15000; // start posting in 15 seconds
       
       //sound alarm (40 cycles)
       for (int thisNote = 0; thisNote < 30; thisNote++) {
@@ -288,9 +293,10 @@ void loop()
         delay(400);
       }
       delay(2000);
-// loop 12 times to record program:
+      
+// loop 24 times to record program:
 // object temperature is sampled every 2 seconds. If it is below zero, ttemp is reduced by 1. If it is above 40C, ttemp is increased by 1.  
-      for(int pcount = 0; pcount < 12; pcount++) {
+      for(int pcount = 0; pcount < 24; pcount++) {
           otemp = mlx90615.printTemperature(MLX90615_OBJECT_TEMPERATURE);
           Serial.print("Object temp: ");
           Serial.println(otemp);
@@ -320,7 +326,7 @@ void loop()
           }
           // if sampled object temperature between 0 and 40C, exit.  
           else {
-            pcount = 12; // exit program mode
+            pcount = 24; // exit program mode
           }
       delay(2000);
       }
@@ -345,20 +351,24 @@ void loop()
     Serial.println(tmode);
 
 // post to data thingspeak every 60 seconds if in mode 1,2 or 3
-    if(mode == 1 || mode == 2 || mode == 3)
+    if(tmode == 2 || tmode == 3)
     {
-      if(currentMillis - tpost >= 50000 && ipost == 0)
+      if(currentMillis - tpost >= 30000 && ipost == 0)
       {
         tpost = currentMillis;
         ipost = 1;
-        String cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
+        cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
         cmd += IP; // concatenating the cmd string with IP
         cmd += "\",80"; // port 80
         ESP8266.println(cmd); // pass command to ESP8266
         Serial.println(cmd);
       }
-      if(currentMillis - tpost >= 5000 && ipost == 1)
+      if(currentMillis - tpost >= 8000 && ipost == 1)
       {
+        if(ESP8266.find("Error")){
+        Serial.println("AT+CIPSTART Error");
+        }
+        
         tpost = currentMillis;
         ipost = 2;
         
@@ -368,7 +378,7 @@ void loop()
         cmd += field2;
         cmd += atemp;
         cmd += field3;
-        cmd += mode;
+        cmd += tmode;
         cmd += field4;
         cmd += vbat;
         cmd += field5;
@@ -379,7 +389,7 @@ void loop()
         Serial.print("AT+CIPSEND=");
         Serial.println(cmd.length());
       }
-      if(currentMillis - tpost >= 5000 && ipost == 2)
+      if(currentMillis - tpost >= 8000 && ipost == 2)
       {
         tpost = currentMillis;
         ipost = 0;
