@@ -5,4 +5,4 @@ Arduino sketch for my WiFi enabled temperature sensing tea alarm project. The se
 
 The threshold temperature is set via a programming mode that is initiated with a sub-zero temperature object and then increased or decreased with hot and cold objects respecively. 
 
-For more information see: https://dielectricdreams.wordpress.com/tea-alarm/
+For more information see: https://hackaday.io/project/10677-eye-o-tea
