@@ -1,0 +1,3 @@
+[submodule "Digital_Infrared_Temperature_Sensor_MLX90615"]
+	path = Digital_Infrared_Temperature_Sensor_MLX90615
+	url = https://github.com/Seeed-Studio/Digital_Infrared_Temperature_Sensor_MLX90615
