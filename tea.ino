@@ -22,18 +22,22 @@
 #include <EEPROM.h>
 #include <SoftwareSerial.h>  //Software Serial to interface with ESP8266
 #include <string.h>
+#include <avr/pgmspace.h> // progmem library
 SoftwareSerial ESP8266(10,11);  //RX,TX
 
 MLX90615 mlx90615;
 
 #define IP "184.106.153.149"  // thingspeak.com IP address
-String GET1 = "GET /apps/thinghttp/send_request?api_key=XXXXXXXXXXXXXXX"; // GET request to activate thingHTTP app
-String GET2 = "GET /update?api_key=XXXXXXXXXXXXXXX"; // GET request to send temperature data to thingspeak
+String GET1 = "GET /apps/thinghttp/send_request?api_key=XXXXXXXXXXXXXXXXXX"; // GET request to activate thingHTTP app
+String GET2 = "GET /update?api_key=XXXXXXXXXXXXXX&field"; // GET request to send temperature data to thingspeak
 String field1="1=";  // object temperature
 String field2="&field2=";  // ambient temperature
 String field3="&field3=";  // mode
 String field4="&field4=";  // battery voltage
 String field5="&field5=";  // threshold temperature
+String TWT = "GET /apps/thingtweet/1/statuses/update?key=XXXXXXXXXXXXXXXX&status=Oh%20no!%20I%20am%20now%20"; //ThingTweet API
+String twtf1 = "%20degrees%20after%20being%20left%20for%20"; //ThingTweet message
+String twtf2 = "%20minutes%20%23coldtea%0A";
 String cmd;
 
 // melodies for acknowledgements:
@@ -63,7 +67,7 @@ unsigned long tpost = 0;  // time elapsed since last thingspeak post
 int ipost = 0;
 int incon = 0; // active WiFi connection to local AP
 
-float Aref = 1.04598;  // the internal reference voltage for battery measurement
+float Aref = 1.08598;  // the internal reference voltage for battery measurement
 float vbat;  // battery voltage
 
 // the threshold temperature 
@@ -116,7 +120,7 @@ void setup()
 
 // if hot cup detected on switch on then bypass the WiFi initialisation
   delay(1000);
-  Serial.print("init temp: ");
+  Serial.print("init t: ");
   otemp = mlx90615.printTemperature(MLX90615_OBJECT_TEMPERATURE); // sample cup temp
   Serial.println(otemp);
   if(otemp < 40.0) {  // do WiFi initialisation process: GET http://168.192.4.1/~ssid~password~
@@ -125,18 +129,18 @@ void setup()
        Serial.write(ESP8266.read());
       }
      ESP8266.println("AT+CWJAP?");
-     Serial.println("Checking AP");
+     Serial.println("Check AP");
      delay(2000);    
      if(ESP8266.find("No AP")) // if no AP connected, set up server to recieve new credentials
      {
-        Serial.println("No AP linked - switching ...");
+        Serial.println("No AP");
         ESP8266.println("AT+CWMODE=2"); // set AP mode
         stat_blink(200,200,4,statled);
         delay(500);
         ESP8266.println("AT+CIPMUX=1"); // enable multiple TCP connections
         stat_blink(400,400,3,statled);
         ESP8266.println("AT+CIPSERVER=1,80");
-        Serial.println("Setting up local server");
+//        Serial.println("Setting up local server");
         delay(1000);
         while(ESP8266.available()) {  // clearing the softserial buffer
           Serial.write(ESP8266.read());
@@ -177,28 +181,31 @@ void setup()
         delay(5000);
 
         if(ESP8266.find("CONNECTED")){
-          Serial.println("CONNECTED");
+//          Serial.println("CONNECTED");
           incon = 1;
           digitalWrite(statled,HIGH);
         }
         else{
-          Serial.println("Not connected");
+//          Serial.println("Not connected");
           incon = 0;
           digitalWrite(statled,LOW);
         }
      }
      else { // AP already set up: good to go and switch on status LED
-         Serial.println("CONNECTED");
+//         Serial.println("CONNECTED");
          incon = 1;
          digitalWrite(statled,HIGH);
      }
   }
   else { // if hot cup on turn on, switch off updates and turn off status LED
-     Serial.println("WIFI NOT CONNECTED");
+//     Serial.println("WIFI NOT CONNECTED");
      incon = 0;
      digitalWrite(statled,LOW);
   }
 }
+
+/////////main loop
+
 
 void loop()
 { 
@@ -207,21 +214,21 @@ void loop()
     oldtemp2 = oldtemp;  // save previous values of object temperature
     oldtemp = otemp;
     
-    Serial.print("otemp: ");
+    Serial.print("o: ");
     otemp = mlx90615.printTemperature(MLX90615_OBJECT_TEMPERATURE);  // get the object temperature
     Serial.println(otemp);
-    Serial.print("atemp: ");
+    Serial.print("a: ");
     atemp = mlx90615.printTemperature(MLX90615_AMBIENT_TEMPERATURE); // get the ambient temperature
     Serial.println(atemp);
 
     int avalue = analogRead(A4); //read divided voltage from A1
-    vbat = avalue*Aref*4.1277/1024; //battery voltage
+    vbat = avalue*Aref*5.255319/1024; //battery voltage
 
 //  detect hot cup (either at startup or after being placed on detector) - this is done by detecting an increase in object temperature above the threshold
 //  and place into mode 1
     if(otemp > ttemp && ttmode == 0) {
       ttmode = 1;
-      Serial.println("Entering mode 1");
+      Serial.println("mode 1");
       //play acnowledgement
       for (int thisNote = 0; thisNote < 2; thisNote++) {
         tone(buzz, melody3[thisNote], 200);
@@ -234,7 +241,7 @@ void loop()
 //  and place into mode 2
     if(otemp > ttemp && oldtemp > ttemp && oldtemp2 > ttemp && ttmode == 1) {
       ttmode = 2;
-      Serial.println("Entering mode 2");
+      Serial.println("mode 2");
       //play acnowledgement
       for (int thisNote = 0; thisNote < 2; thisNote++) {
         tone(buzz, melody1[thisNote], 200);
@@ -244,9 +251,9 @@ void loop()
     tcool = currentMillis;  //  start the timer
 
     if(incon == 1) {
-      tpost = currentMillis - 15000; // start posting in 15 seconds
+      tpost = currentMillis - 10000; // start posting in 15 seconds
       ESP8266.println("AT+RST"); // reset the ESP8266.
-      Serial.println("AT+RST");
+      Serial.println("RST");
     } 
     }
 
@@ -254,7 +261,7 @@ void loop()
 // and place into mode 0
     if(otemp < (ttemp - 2.0) && oldtemp > (ttemp + 2.0) && ttmode == 2) {
       ttmode = 0;
-      Serial.println("Cup removed, entering mode 0");
+      Serial.println("Cup removed");
       tcool = 0; // reset the timer
     }
       
@@ -262,21 +269,21 @@ void loop()
 //  and place into mode 3 and sound alarm
     if(otemp < ttemp && otemp > (ttemp - 2.0) && oldtemp < (ttemp + 2.0) && ttmode == 2) {
       ttmode = 3;
-      Serial.println("Temperature alarm: entering mode 3");
+      Serial.println("alarm: mode 3");
       int timepassed = (currentMillis - tcool)/1000; //  time since mode 2 entered (s)
       int mins = timepassed/60;  // convert to minutes
       int secs = timepassed%60;  // and seconds
-      Serial.print("Time cooling: ");
+      Serial.print("cooling: ");
       Serial.print(mins);
-      Serial.print(" minutes ");
+      Serial.print(" mins ");
       Serial.print(secs);
-      Serial.println(" seconds ");
+      Serial.println(" secs");
 
       if(incon == 1) {
 //    send SMS message via ThingHTTP
       ESP8266.println("AT+RST"); // this resets the ESP8266.
-      Serial.println("AT+RST");
-      delay(5000);
+      Serial.println("RST");
+      delay(7000);
 //      ESP8266.println("AT"); // check ESP8266 is OK
 //      delay(1500)
 //      if(ESP8266.find("OK")){
@@ -290,15 +297,14 @@ void loop()
 
       ESP8266.println(cmd); // pass command to ESP8266
       Serial.println(cmd);
-      delay(4000);
+      delay(5000);
       
       if(ESP8266.find("Error")){
-        Serial.println("AT+CIPSTART Error");
+        Serial.println("CIPSTART Error");
         delay(5000);
-        Serial.println("try again ...");
         ESP8266.println(cmd);
         Serial.println(cmd);
-        delay(3000);
+        delay(5000);
       }
       
       cmd = GET1; // sending HTTP get to ThingHTTP
@@ -307,7 +313,7 @@ void loop()
       ESP8266.println(cmd.length());
       Serial.print("AT+CIPSEND=");
       Serial.println(cmd.length());
-      delay(7000);
+      delay(8000);
       if(ESP8266.find(">")){ // check that the prompt is recieved
         ESP8266.print(cmd); // pass GET command to ESP8266
         Serial.print(">");
@@ -315,7 +321,33 @@ void loop()
       }
       else
       {
-        Serial.println("AT+CIPSEND error");
+        Serial.println("CIPSEND error");
+        ESP8266.println("AT+RST"); // try again
+        delay(7000);
+
+        ESP8266.println(cmd); // pass command to ESP8266
+        Serial.println(cmd);
+        delay(5000);
+      
+        if(ESP8266.find("Error")){
+          delay(5000);
+          ESP8266.println(cmd);
+          Serial.println(cmd);
+          delay(5000);
+        }
+      
+        cmd = GET1; // sending HTTP get to ThingHTTP
+        cmd += "\r\n\r\n"; 
+        ESP8266.print("AT+CIPSEND="); 
+        ESP8266.println(cmd.length());
+        Serial.print("AT+CIPSEND=");
+        Serial.println(cmd.length());
+        delay(8000);
+        if(ESP8266.find(">")){ // check that the prompt is recieved
+          ESP8266.print(cmd); // pass GET command to ESP8266
+          Serial.print(">");
+          Serial.println(cmd);
+        }
       }
 
       ipost = 0;
@@ -335,7 +367,7 @@ void loop()
         if(otemp < tcold) {
           thisNote = 40;
           ttmode = 0;
-          Serial.println("Cup picked up: alarm cancelled");
+          Serial.println("alarm cancelled");
           tcool = 0;
         }
          
@@ -346,21 +378,59 @@ void loop()
 //  and place into mode 0 and send tweet
     if(otemp < tcold && otemp > tcold - 2.0 && ttmode == 3) {
       ttmode = 0;
-      Serial.println("Tea gone cold: entering mode 0");
+      Serial.println("Tea cold: mode 0");
       int timepassed = (currentMillis - tcool)/1000; //  time since mode 2 entered (s)
       int mins = timepassed/60;  // convert to minutes
       int secs = timepassed%60;  // and seconds
 
 // send tweet
+      ESP8266.println("AT+RST"); // this resets the ESP8266.
+      Serial.println("AT+RST");
+      delay(5000);
+      
+      cmd = "AT+CIPSTART=\"TCP\",\""; // connect with thingspeak server
+      cmd += IP; // concatenating the cmd string with IP
+      cmd += "\",80"; // port 80
 
-
+      ESP8266.println(cmd); // pass command to ESP8266
+      Serial.println(cmd);
+      delay(4000);
+      
+      if(ESP8266.find("Error")){
+        Serial.println("AT+CIPSTART Error");
+        delay(5000);
+        ESP8266.println(cmd);
+        Serial.println(cmd);
+        delay(3000);
+      }
+      
+      cmd = TWT; // command to ThingTweet
+      cmd += otemp;
+      cmd += twtf1;
+      cmd += mins;
+      cmd += twtf2;
+      cmd += "\r\n\r\n"; 
+      ESP8266.print("AT+CIPSEND="); 
+      ESP8266.println(cmd.length());
+      Serial.print("AT+CIPSEND=");
+      Serial.println(cmd.length());
+      delay(7000);
+      if(ESP8266.find(">")){ // check that the prompt is recieved
+        ESP8266.print(cmd); // pass GET command to ESP8266
+        Serial.print(">");
+        Serial.println(cmd);
+      }
+      else
+      {
+        Serial.println("CIPSEND error");
+      }
       tcool = 0; //reset timer
     }      
 
 // cup removed when in alarm mode
     if(otemp < 30.0 && ttmode == 3) {
       ttmode = 0;
-      Serial.println("Cup removed: entering mode 0");
+      Serial.println("Cup removed");
       tcool = 0; // reset timer
     }          
     
@@ -381,7 +451,7 @@ void loop()
 // mode 5
     if(otemp < 0.0 && oldtemp < 0.0 && oldtemp2 < 0.0 && ttmode == 0) {
       ttmode = 5;
-      Serial.println("Programming mode 5");
+      Serial.println("mode 5");
       //play acnowledgement amd blink blue led three times
       for (int thisNote = 0; thisNote < 3; thisNote++) {
         tone(buzz, melody2[thisNote], 200);
@@ -399,7 +469,7 @@ void loop()
 // object temperature is sampled every 2 seconds. If it is below zero, ttemp is reduced by 1. If it is above 40C, ttemp is increased by 1.  
       for(int pcount = 0; pcount < 24; pcount++) {
           otemp = mlx90615.printTemperature(MLX90615_OBJECT_TEMPERATURE);
-          Serial.print("Object temp: ");
+          Serial.print("O temp: ");
           Serial.println(otemp);
           if(otemp < 0.0) {
               ttemp = ttemp - 1;  // reduce the threshold temperature by 1 degree
@@ -410,7 +480,7 @@ void loop()
               brightnessb = 0;
               analogWrite(ledb, brightnessb);
               noTone(buzz);
-              Serial.print("Reduce ttemp: ");
+              Serial.print("- ttemp: ");
               Serial.println(ttemp);
           }
           else if(otemp > 40.0) {
@@ -422,7 +492,7 @@ void loop()
               brightnessr = 0;
               analogWrite(ledr, brightnessr);
               noTone(buzz);
-              Serial.print("Increase ttemp: ");
+              Serial.print("+ ttemp: ");
               Serial.println(ttemp);
           }
           // if sampled object temperature between 0 and 40C, exit.  
@@ -431,7 +501,7 @@ void loop()
           }
       delay(2000);
       }
-    Serial.print("Exiting program mode");
+    Serial.print("Exiting");
       //play acnowledgement and flash blue LED
       for (int thisNote = 0; thisNote < 3; thisNote++) {
         tone(buzz, melody2[thisNote], 200);
@@ -468,7 +538,7 @@ void loop()
       if(currentMillis - tpost >= 8000 && ipost == 1)
       {
         if(ESP8266.find("Error")){
-        Serial.println("AT+CIPSTART Error");
+        Serial.println("CIPSTART Error");
         }
         
         tpost = currentMillis;
@@ -503,7 +573,7 @@ void loop()
         }
         else
         {
-          Serial.println("AT+CIPSEND error2");
+          Serial.println("CIPSEND error2");
         }
       }
     }
